@@ -1,6 +1,7 @@
-name: CI/CD to EKS
+name: CI/CD
 
 on:
+  pull_request:
   push:
     branches:
       - main
@@ -10,45 +11,114 @@ env:
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
   ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
   EKS_CLUSTER_NAME: ${{ secrets.EKS_CLUSTER_NAME }}
-  IMAGE_TAG: latest
-  ECR_URI: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}
+  IMAGE_TAG: ${{ github.sha }}
 
 jobs:
-  build-and-deploy:
+  test:
+    name: Build and test serving app
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
 
-    - name: Login to Amazon ECR
-      uses: aws-actions/amazon-ecr-login@v2
+      - name: Run unit tests
+        run: pytest -q
 
-    - name: Build and Push Docker Image (ARM64)
-      run: |
-        docker buildx build --platform linux/arm64 \
-          -t $ECR_URI:$IMAGE_TAG \
-          --push ./serving
+      - name: Build Docker image
+        run: docker build -t ml-serving:test ./serving
 
-    - name: Update kubeconfig
-      run: |
-        aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER_NAME
+  terraform-validate:
+    name: Validate Terraform
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Deploy with Helm
-      run: |
-        helm upgrade --install webapp ./iac/my-webapp \
-          --namespace default \
-          --create-namespace \
-          --set image.repository=$ECR_URI \
-          --set image.tag=$IMAGE_TAG \
-          --set image.pullPolicy=Always
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform fmt check
+        working-directory: iac
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        working-directory: iac
+        run: terraform init -backend=false
+
+      - name: Terraform validate
+        working-directory: iac
+        run: terraform validate
+
+  publish-image:
+    name: Publish serving image
+    runs-on: ubuntu-latest
+    needs: [test, terraform-validate]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      image_uri: ${{ steps.image.outputs.image_uri }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image URI
+        id: image
+        run: echo "image_uri=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image
+        run: |
+          docker build -t "${{ steps.image.outputs.image_uri }}:${IMAGE_TAG}" ./serving
+          docker push "${{ steps.image.outputs.image_uri }}:${IMAGE_TAG}"
+
+  deploy:
+    name: Deploy infrastructure and application
+    runs-on: ubuntu-latest
+    needs: publish-image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        working-directory: iac
+        run: terraform init
+
+      - name: Terraform apply
+        working-directory: iac
+        run: |
+          terraform apply -auto-approve \
+            -var="image_repository=${{ needs.publish-image.outputs.image_uri }}" \
+            -var="image_tag=${IMAGE_TAG}" \
+            -var="image_pull_policy=Always" \
+            -var="ingress_nginx_values_file=my-webapp/nginx-nlb-values.yaml"

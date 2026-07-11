@@ -1,38 +1,35 @@
 grafana:
-  service:
-    type: LoadBalancer
-    port: 80
   adminPassword: "admin"
-
-  ingress:
-    enabled: false
+  service:
+    type: ClusterIP
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+    datasources:
+      enabled: true
+      defaultDatasourceEnabled: true
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki-stack.monitoring.svc.cluster.local:3100
+      isDefault: false
 
 prometheus:
   prometheusSpec:
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
-
+    retention: 6h
   service:
-    type: LoadBalancer
-    annotations:
-      service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    type: ClusterIP
 
-  ingress:
-    enabled: false
+alertmanager:
+  enabled: true
 
-serviceMonitor:
-  selfMonitor: true
+kube-state-metrics:
+  enabled: true
 
-# Enable scraping your FastAPI app
-additionalServiceMonitors:
-  - name: fastapi-metrics
-    selector:
-      matchLabels:
-        app: my-webapp
-    namespaceSelector:
-      matchNames:
-        - default
-    endpoints:
-      - port: http
-        path: /metrics
-        interval: 15s
+prometheus-node-exporter:
+  enabled: true

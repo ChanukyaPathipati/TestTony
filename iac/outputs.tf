@@ -1,27 +1,19 @@
-# Copyright (c) HashiCorp, Inc.
-# SPDX-License-Identifier: MPL-2.0
-
-output "cluster_endpoint" {
-  description = "Endpoint for EKS control plane"
-  value       = module.eks.cluster_endpoint
+output "application_url" {
+  description = "Local URL when using Kind/Minikube port-forwarding or localhost ingress."
+  value       = "http://localhost"
 }
 
-output "cluster_security_group_id" {
-  description = "Security group ids attached to the cluster control plane"
-  value       = module.eks.cluster_security_group_id
+output "application_namespace" {
+  description = "Namespace containing the serving application."
+  value       = var.namespace
 }
 
-output "region" {
-  description = "AWS region"
-  value       = var.region
+output "grafana_port_forward" {
+  description = "Command to open the monitoring dashboard locally."
+  value       = "kubectl -n ${var.monitoring_namespace} port-forward svc/kube-prom-stack-grafana 3000:80"
 }
 
-output "cluster_name" {
-  description = "Kubernetes Cluster Name"
-  value       = module.eks.cluster_name
-}
-
-output "nginx_nlb_dns" {
-  description = "NGINX Ingress Controller NLB DNS Name"
-  value       = data.kubernetes_service.nginx_lb.status[0].load_balancer[0].ingress[0].hostname
+output "prometheus_port_forward" {
+  description = "Command to open Prometheus locally."
+  value       = "kubectl -n ${var.monitoring_namespace} port-forward svc/kube-prom-stack-kube-prome-prometheus 9090:9090"
 }

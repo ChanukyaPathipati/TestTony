@@ -1,0 +1,22 @@
+loki:
+  enabled: true
+  persistence:
+    enabled: false
+
+promtail:
+  enabled: true
+  config:
+    clients:
+      - url: http://loki-stack:3100/loki/api/v1/push
+
+grafana:
+  enabled: false
+
+prometheus:
+  enabled: false
+
+filebeat:
+  enabled: false
+
+fluent-bit:
+  enabled: false

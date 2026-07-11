@@ -1,18 +1,9 @@
-
-# This file contains all the configurable values for your application, 
-# such as image details, replicas, and ingress settings.
-
-# web-app-helm-chart/values.yaml
-# Define a custom name for your resources (e.g., web-app)
-# Default values for my-webapp
-# web-app-helm-chart/values.yaml
-
-replicaCount: 2
+replicaCount: 1
 
 image:
-  repository: 281695752858.dkr.ecr.us-east-1.amazonaws.com/huggingface-fastapi
-  tag: latest
-  pullPolicy: Always
+  repository: ml-serving
+  tag: local
+  pullPolicy: IfNotPresent
 
 service:
   type: ClusterIP
@@ -20,9 +11,9 @@ service:
 
 ingress:
   enabled: true
-  className: "external-nginx"
+  className: external-nginx
   hosts:
-    - host: ""  # You can add a domain or NLB DNS here
+    - host: localhost
       paths:
         - path: /
           pathType: Prefix
@@ -31,8 +22,14 @@ ingress:
 
 resources:
   requests:
-    cpu: 100m
-    memory: 128Mi
+    cpu: "500m"
+    memory: "1Gi"
   limits:
-    cpu: 200m
-    memory: 256Mi
+    cpu: "6"
+    memory: "12Gi"
+
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  interval: 15s
+  path: /metrics
